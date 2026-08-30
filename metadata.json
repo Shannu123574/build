@@ -1,0 +1,6 @@
+{
+  "name": "RecoverOS AI",
+  "description": "AI-powered autonomous revenue recovery operating system with deterministic safety guards for Razorpay merchants.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
