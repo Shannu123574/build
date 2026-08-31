@@ -13,6 +13,64 @@ app.use(cors());
 app.use('/api/webhooks/razorpay', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
+import Razorpay from 'razorpay';
+
+let liveRazorpay: any = null;
+if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+  liveRazorpay = new Razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_KEY_SECRET,
+  });
+}
+
+app.post('/api/payments/create-order', async (req, res) => {
+  if (!liveRazorpay) {
+    return res.status(500).json({ error: 'Razorpay keys not configured' });
+  }
+  try {
+    const { amount, receipt, incident_id } = req.body;
+    if (!amount) return res.status(400).json({ error: 'Missing amount' });
+    
+    // Convert to paise
+    const amountInPaise = Math.round(Number(amount) * 100);
+    const options: any = {
+      amount: amountInPaise,
+      currency: 'INR',
+      receipt: receipt || incident_id || 'receipt_' + Date.now(),
+    };
+    if (incident_id) {
+      options.notes = { incident_id };
+    }
+    const order = await liveRazorpay.orders.create(options);
+    res.json(order);
+  } catch (error: any) {
+    console.error('Create Order Error:', error);
+    res.status(500).json({ error: error.message || 'Error creating order' });
+  }
+});
+
+app.post('/api/payments/verify', async (req, res) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const crypto = await import('crypto');
+    
+    const secret = process.env.RAZORPAY_KEY_SECRET;
+    if (!secret) return res.status(500).json({ error: 'Razorpay secret not configured' });
+    
+    const body = razorpay_order_id + '|' + razorpay_payment_id;
+    const expectedSignature = crypto.createHmac('sha256', secret).update(body).digest('hex');
+    
+    if (expectedSignature === razorpay_signature) {
+      res.json({ success: true, message: 'Payment verified successfully' });
+    } else {
+      res.status(400).json({ success: false, error: 'Invalid signature' });
+    }
+  } catch (error) {
+    console.error('Verify Payment Error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 const LOCAL_DEMO_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || 'recoveros_local_demo_webhook_secret';
 
 app.post('/api/webhooks/razorpay', async (req, res) => {
@@ -27,7 +85,9 @@ app.post('/api/webhooks/razorpay', async (req, res) => {
 
     // 1. Verify HMAC signature
     const crypto = await import('crypto');
-    const expectedSignature = crypto.createHmac('sha256', LOCAL_DEMO_SECRET).update(rawBody).digest('hex');
+    // NOTE: For live events, use the RAZORPAY_WEBHOOK_SECRET if configured.
+    const secretToUse = process.env.RAZORPAY_WEBHOOK_SECRET || LOCAL_DEMO_SECRET;
+    const expectedSignature = crypto.createHmac('sha256', secretToUse).update(rawBody).digest('hex');
     if (expectedSignature !== signature) {
       return res.status(401).json({ error: 'Invalid signature' });
     }
@@ -60,7 +120,25 @@ app.post('/api/webhooks/razorpay', async (req, res) => {
     // 5. Asynchronous Processing
     (async () => {
       try {
-        await processWebhook(payload, eventId);
+        if (payload.event === 'payment.captured') {
+          const incidentId = payload.payload?.payment?.entity?.notes?.incident_id;
+          if (incidentId) {
+             const amountInr = payload.payload.payment.entity.amount / 100;
+             await db.run('UPDATE incidents SET status = ?, recovered_amount = ?, updated_at = ? WHERE id = ?', ['RECOVERED — SETTLED', amountInr, Date.now(), incidentId]);
+             
+             // Append to Audit Ledger
+             const prevHashRow = await db.get('SELECT hash FROM audit_ledger ORDER BY id DESC LIMIT 1');
+             const previousHash = prevHashRow ? prevHashRow.hash : '0000000000000000000000000000000000000000000000000000000000000000';
+             const contentToHash = `${previousHash}|${incidentId}|LIVE_PAYMENT_CAPTURED|RECOVERED — SETTLED|${amountInr}|${Date.now()}`;
+             const newHash = crypto.createHash('sha256').update(contentToHash).digest('hex');
+             
+             await db.run('INSERT INTO audit_ledger (hash, previous_hash, incident_id, event_type, timestamp) VALUES (?, ?, ?, ?, ?)', [
+               newHash, previousHash, incidentId, 'LIVE_PAYMENT_CAPTURED', Date.now()
+             ]);
+          }
+        } else {
+          await processWebhook(payload, eventId);
+        }
         await db.run('UPDATE webhook_events SET status = ? WHERE event_id = ?', ['PROCESSED', eventId]);
       } catch (err) {
         console.error('Async processing error for event', eventId, ':', err);
