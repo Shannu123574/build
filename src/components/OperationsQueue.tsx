@@ -1,10 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { ShieldAlert, Activity, CheckCircle, Clock } from 'lucide-react';
+import { ShieldAlert, Activity, CheckCircle, Clock, CreditCard } from 'lucide-react';
+import { CheckoutModal } from './CheckoutModal';
 
 export const OperationsQueue: React.FC = () => {
   const [incidents, setIncidents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [envState, setEnvState] = useState<string>('UNKNOWN');
+  
+  // Checkout Modal State
+  const [activeCheckout, setActiveCheckout] = useState<any>(null);
 
   const fetchData = async () => {
     try {
@@ -27,7 +31,7 @@ export const OperationsQueue: React.FC = () => {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 5000);
+    const interval = setInterval(fetchData, 3000);
     return () => clearInterval(interval);
   }, []);
 
@@ -43,80 +47,125 @@ export const OperationsQueue: React.FC = () => {
     }
   };
 
+  const handlePaymentSuccess = () => {
+    fetchData();
+  };
+
+  const totalRisk = incidents.filter(i => !i.status?.includes('RECOVERED') && i.status !== 'CANCELLED').reduce((sum, i) => sum + i.amount, 0);
+  const totalRecovered = incidents.filter(i => i.status?.includes('RECOVERED')).reduce((sum, i) => sum + i.amount, 0);
+  const totalValid = totalRisk + totalRecovered;
+  const recoveryRate = totalValid > 0 ? ((totalRecovered / totalValid) * 100).toFixed(1) : '0.0';
+
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center bg-slate-900 border border-slate-700 p-6 rounded-2xl">
-        <div>
-          <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Activity className="text-indigo-400" />
-            Operations Queue
-          </h2>
-          <p className="text-slate-400 mt-1">Live tracking of active and resolved recovery incidents.</p>
+    <>
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="border-b border-slate-200 bg-slate-50/50 p-6 flex justify-between items-center">
+          <div>
+            <h2 className="text-xl font-bold text-slate-800">Operations Queue</h2>
+            <p className="text-sm text-slate-500 mt-1">Live tracking of active and resolved recovery incidents.</p>
+          </div>
+          <div className="flex items-center gap-3">
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          {envState === 'SIMULATION' && (
-            <button onClick={clearDemoData} className="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded text-xs transition font-semibold">
-              Clear local demo data
-            </button>
+        
+        <div className="overflow-x-auto">
+          {loading ? (
+            <div className="p-8 text-center text-slate-500 font-medium">Loading incidents...</div>
+          ) : incidents.length === 0 ? (
+            <div className="p-12 text-center text-slate-500">
+              <Activity size={32} className="mx-auto text-slate-300 mb-3" />
+              <p className="font-medium text-slate-600">No active incidents found.</p>
+              <p className="text-sm">Send a webhook to populate the database.</p>
+            </div>
+          ) : (
+            <table className="w-full text-left text-sm text-slate-600">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-6 py-4 font-bold text-slate-700">Incident / Payment ID</th>
+                  <th className="px-6 py-4 font-bold text-slate-700">Status</th>
+                  <th className="px-6 py-4 font-bold text-slate-700">Amount (₹)</th>
+                  <th className="px-6 py-4 font-bold text-slate-700">Recovered (₹)</th>
+                  <th className="px-6 py-4 font-bold text-slate-700 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {incidents.map(inc => {
+                  const currentStatus = (inc.status || '').toUpperCase();
+                  return (
+                    <tr key={inc.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="font-mono text-xs font-bold text-blue-600">{inc.id}</div>
+                        <div className="text-xs text-slate-400 mt-1">{inc.payment_id}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        {currentStatus === 'CANCELLED' ? (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                            Cancelled
+                          </span>
+                        ) : currentStatus === 'PAYMENT_FAILED' ? (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                            Payment Failed
+                          </span>
+                        ) : currentStatus.includes('RECOVERED') ? (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            Settled
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                            Pending
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 font-mono font-medium text-slate-700">₹{inc.amount}</td>
+                      <td className="px-6 py-4 font-mono font-bold text-emerald-600">
+                        ₹{['PAYMENT_FAILED', 'CANCELLED'].includes(currentStatus) ? 0 : inc.recovered_amount}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        {(currentStatus === 'CANCELLED' || currentStatus === 'PAYMENT_FAILED') ? (
+                          <button 
+                            onClick={() => setActiveCheckout(inc)}
+                            className="text-blue-600 hover:text-blue-800 font-bold text-xs transition-colors flex items-center gap-1 inline-flex ml-auto justify-end bg-blue-50 px-3 py-1.5 rounded-md border border-blue-100 hover:bg-blue-100"
+                          >
+                            <CreditCard size={14} /> Retry Recovery
+                          </button>
+                        ) : currentStatus.includes('RECOVERED') ? (
+                          <span className="text-emerald-600 text-xs flex items-center gap-1 justify-end font-bold px-2 py-1.5 rounded inline-flex ml-auto">
+                            <CheckCircle size={14} /> Ledger Settled
+                          </span>
+                        ) : currentStatus === 'POLICY_DENIED' ? (
+                          <span className="text-rose-600 text-xs flex items-center gap-1 justify-end font-bold px-2 py-1.5 rounded inline-flex ml-auto">
+                            <ShieldAlert size={14} /> Blocked by Security
+                          </span>
+                        ) : (
+                          <button 
+                            onClick={() => setActiveCheckout(inc)}
+                            className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition flex items-center gap-2 inline-flex ml-auto shadow-sm font-bold"
+                          >
+                            <CreditCard size={14} /> Initiate Recovery
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           )}
-          {envState === 'RAZORPAY_TEST_MODE' && <span className="px-3 py-1 bg-amber-500/20 text-amber-300 rounded border border-amber-500/50 text-sm font-mono font-bold">RAZORPAY TEST MODE</span>}
-          {envState === 'SIMULATION' && <span className="px-3 py-1 bg-slate-700 text-slate-300 rounded border border-slate-600 text-sm font-mono font-bold">SIMULATION</span>}
-          {envState === 'PRODUCTION_LOCKED' && <span className="px-3 py-1 bg-rose-500/20 text-rose-300 rounded border border-rose-500/50 text-sm font-mono font-bold flex items-center gap-1"><ShieldAlert size={14} /> PRODUCTION LOCKED</span>}
         </div>
       </div>
 
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-        {loading ? (
-          <div className="p-8 text-center text-slate-400">Loading incidents...</div>
-        ) : incidents.length === 0 ? (
-          <div className="p-8 text-center text-slate-500">No active incidents found in the server database. Send a webhook to begin.</div>
-        ) : (
-          <table className="w-full text-left text-sm text-slate-300">
-            <thead className="bg-slate-950 border-b border-slate-800">
-              <tr>
-                <th className="px-6 py-4 font-semibold">Incident / Payment ID</th>
-                <th className="px-6 py-4 font-semibold">Status</th>
-                <th className="px-6 py-4 font-semibold">Amount (₹)</th>
-                <th className="px-6 py-4 font-semibold">Recovered (₹)</th>
-                <th className="px-6 py-4 font-semibold text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
-              {incidents.map(inc => (
-                <tr key={inc.id} className="hover:bg-slate-800/50 transition">
-                  <td className="px-6 py-4">
-                    <div className="font-mono text-xs text-indigo-400">{inc.id}</div>
-                    <div className="text-xs text-slate-500">{inc.payment_id}</div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 rounded text-xs font-bold ${
-                      inc.status === 'RECOVERED' ? 'bg-emerald-500/20 text-emerald-400' :
-                      inc.status === 'POLICY_DENIED' ? 'bg-rose-500/20 text-rose-400' :
-                      'bg-indigo-500/20 text-indigo-400'
-                    }`}>
-                      {inc.status === 'RECOVERED' && envState === 'SIMULATION' ? 'RECOVERED — SIMULATED SETTLEMENT' : inc.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 font-mono">₹{inc.amount}</td>
-                  <td className="px-6 py-4 font-mono text-emerald-400">₹{inc.recovered_amount}</td>
-                  <td className="px-6 py-4 text-right">
-                    {inc.status === 'ACTION_EXECUTED' ? (
-                      <button onClick={() => reconcile(inc.id)} className="text-xs bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded transition flex items-center gap-1 inline-flex">
-                        <CheckCircle size={12} /> Verify Gateway
-                      </button>
-                    ) : (
-                      <span className="text-slate-500 text-xs flex items-center gap-1 justify-end">
-                        {inc.status === 'RECOVERED' ? <CheckCircle size={12} /> : <Clock size={12} />} 
-                        {inc.status === 'RECOVERED' ? 'Settled' : 'Pending'}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
+      {activeCheckout && (
+        <CheckoutModal 
+          isOpen={!!activeCheckout}
+          onClose={() => {
+            setActiveCheckout(null);
+            fetchData();
+          }}
+          incidentId={activeCheckout.id}
+          amountInr={activeCheckout.amount}
+          onSuccess={handlePaymentSuccess}
+        />
+      )}
+    </>
   );
 };

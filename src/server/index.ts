@@ -15,59 +15,249 @@ app.use(express.json());
 
 import Razorpay from 'razorpay';
 
-let liveRazorpay: any = null;
-if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
-  liveRazorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID,
-    key_secret: process.env.RAZORPAY_KEY_SECRET,
-  });
-}
+import os from 'os';
 
-app.post('/api/payments/create-order', async (req, res) => {
-  if (!liveRazorpay) {
-    return res.status(500).json({ error: 'Razorpay keys not configured' });
-  }
+const qrScanStatuses = new Map<string, boolean>();
+
+app.get('/api/network-ip', (req, res) => {
+  // Hardcoded for hackathon demo to bypass WSL/Virtual adapter issues
+  const bestIp = '192.168.10.46';
+  
+  console.log('\n=========================================');
+  console.log('📡 [NETWORK] Target IP strictly set to:', bestIp);
+  console.log('=========================================\n');
+  
+  res.json({ ip: bestIp });
+});
+
+app.get('/api/payments/scan/:order_id', (req, res) => {
+  const orderId = req.params.order_id;
+  const amount = req.query.amount || '4999';
+
+  res.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-store, no-cache, must-revalidate'
+  });
+
+  res.end(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Secure Checkout</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f8fafc; }
+    .card { background: white; padding: 2.5rem 1.5rem; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); text-align: center; width: 90%; max-width: 350px; }
+    .subtitle { color: #64748b; margin: 0; text-transform: uppercase; font-size: 0.8rem; font-weight: 600; letter-spacing: 1px; }
+    .title { margin: 0.5rem 0; color: #0f172a; font-size: 1.5rem; }
+    .amount-container { margin: 1.5rem 0 2rem 0; }
+    .amount { font-size: 3rem; font-weight: 800; color: #0f172a; }
+    .btn { background: #2563eb; color: white; border: none; padding: 1.2rem; width: 100%; border-radius: 12px; font-size: 1.1rem; font-weight: 700; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 12px rgba(37,99,235,0.2); }
+    .btn:disabled { background: #94a3b8; cursor: not-allowed; transform: none; box-shadow: none; }
+    #success-view { display: none; margin-top: 1rem; }
+    .check-icon { font-size: 4rem; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div id="checkout-ui">
+      <p class="subtitle">Paying to</p>
+      <h2 class="title">RecoverOS Gateway</h2>
+      <div class="amount-container"><span class="amount">₹${amount}</span></div>
+      <button class="btn" id="pay-btn">Approve Payment</button>
+    </div>
+    
+    <div id="success-view">
+      <div class="check-icon">✅</div>
+      <h2 style="color: #15803d; margin: 0 0 0.5rem 0;">Successful!</h2>
+      <p style="color: #475569; margin: 0;">Look back at your computer screen.</p>
+    </div>
+  </div>
+
+  <script>
+    // Safely scoped variables
+    var backendOrderId = "${orderId}";
+    var payBtn = document.getElementById('pay-btn');
+    var checkoutUi = document.getElementById('checkout-ui');
+    var successView = document.getElementById('success-view');
+
+    payBtn.addEventListener('click', function() {
+      // Visual feedback instantly
+      payBtn.innerText = 'Processing...';
+      payBtn.disabled = true;
+      
+      // Execute confirmation POST
+      fetch('/api/payments/scan/' + backendOrderId + '/confirm', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+      .then(function(response) {
+        if(response.ok) {
+          checkoutUi.style.display = 'none';
+          successView.style.display = 'block';
+        } else {
+          alert('Transaction failed to process.');
+          payBtn.innerText = 'Approve Payment';
+          payBtn.disabled = false;
+        }
+      })
+      .catch(function(err) {
+        alert('Network connection lost.');
+        payBtn.innerText = 'Approve Payment';
+        payBtn.disabled = false;
+      });
+    });
+  </script>
+</body>
+</html>
+  `);
+});
+
+app.post('/api/payments/scan/:order_id/confirm', (req, res) => {
+  qrScanStatuses.set(req.params.order_id, true);
+  res.json({ success: true, message: 'Payment Authorized' });
+});
+
+app.get('/api/payments/status/:order_id', (req, res) => {
+  res.json({ scanned: qrScanStatuses.get(req.params.order_id) === true });
+});
+
+let liveRazorpay: any = null;
+
+app.post('/api/payments/create-order', async (req, res, next) => {
   try {
     const { amount, receipt, incident_id } = req.body;
-    if (!amount) return res.status(400).json({ error: 'Missing amount' });
-    
-    // Convert to paise
-    const amountInPaise = Math.round(Number(amount) * 100);
-    const options: any = {
-      amount: amountInPaise,
-      currency: 'INR',
-      receipt: receipt || incident_id || 'receipt_' + Date.now(),
-    };
-    if (incident_id) {
-      options.notes = { incident_id };
+    if (!amount) {
+      return res.status(400).json({ success: false, error: 'Amount is required' });
     }
-    const order = await liveRazorpay.orders.create(options);
-    res.json(order);
+    
+    // TEST GATEWAY BYPASS
+    const amountInPaise = Math.round(Number(amount) * 100);
+    return res.json({ 
+      success: true, 
+      order_id: 'order_test_' + Date.now(), 
+      amount: amountInPaise, 
+      key_id: process.env.RAZORPAY_KEY_ID || 'test_key' 
+    });
   } catch (error: any) {
     console.error('Create Order Error:', error);
-    res.status(500).json({ error: error.message || 'Error creating order' });
+    return res.status(500).json({ 
+      success: false, 
+      error: error.description || error.message || 'Razorpay Order Creation Failed' 
+    });
   }
 });
 
 app.post('/api/payments/verify', async (req, res) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-    const crypto = await import('crypto');
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, amount, incident_id, mock_status } = req.body;
     
-    const secret = process.env.RAZORPAY_KEY_SECRET;
-    if (!secret) return res.status(500).json({ error: 'Razorpay secret not configured' });
-    
-    const body = razorpay_order_id + '|' + razorpay_payment_id;
-    const expectedSignature = crypto.createHmac('sha256', secret).update(body).digest('hex');
-    
-    if (expectedSignature === razorpay_signature) {
-      res.json({ success: true, message: 'Payment verified successfully' });
-    } else {
-      res.status(400).json({ success: false, error: 'Invalid signature' });
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ success: false, error: 'Missing verification parameters' });
     }
+
+    const { getDb } = await import('./db/index.ts');
+    const db = await getDb();
+    const crypto = await import('crypto');
+
+    // EXPLICIT DEMO CANCEL/FAIL BYPASS
+    if (mock_status === 'cancelled' || mock_status === 'failed') {
+      const targetStatus = mock_status === 'cancelled' ? 'CANCELLED' : 'PAYMENT_FAILED';
+      if (incident_id) {
+        await db.run(
+          `UPDATE incidents SET status = ?, recovered_amount = 0 WHERE id = ?`,
+          [targetStatus, incident_id]
+        );
+      }
+      return res.json({ success: true, status: targetStatus, message: `Transaction ${targetStatus}` });
+    }
+
+    // TEST GATEWAY BYPASS
+    if (razorpay_payment_id.startsWith('pay_test_') || razorpay_payment_id.startsWith('demo_success_') || razorpay_payment_id.startsWith('pay_direct_')) {
+      const amountInr = amount ? Math.round(Number(amount) / 100) : 0;
+      let finalHash = 'PENDING_SYNC';
+      
+      let dbStatus = 'RECOVERED - SETTLED';
+      let recoveredAmt = amountInr;
+      
+      if (mock_status === 'failed') {
+        dbStatus = 'PAYMENT_FAILED';
+        recoveredAmt = 0;
+      } else if (mock_status === 'cancelled') {
+        dbStatus = 'CANCELLED';
+        recoveredAmt = 0;
+      }
+
+      if (incident_id && amountInr > 0) {
+        await db.run('UPDATE incidents SET status = ?, recovered_amount = ?, updated_at = ? WHERE id = ?', 
+          [dbStatus, recoveredAmt, Date.now(), incident_id]);
+        
+        const prevHashRow = await db.get('SELECT hash FROM audit_ledger ORDER BY id DESC LIMIT 1');
+        const previousHash = prevHashRow ? prevHashRow.hash : '0000000000000000000000000000000000000000000000000000000000000000';
+        const contentToHash = `${previousHash}|${incident_id}|LIVE_PAYMENT_CAPTURED|${dbStatus}|${recoveredAmt}|${Date.now()}`;
+        finalHash = crypto.createHash('sha256').update(contentToHash).digest('hex');
+        
+        await db.run('INSERT INTO audit_ledger (hash, previous_hash, incident_id, event_type, timestamp) VALUES (?, ?, ?, ?, ?)', [
+          finalHash, previousHash, incident_id, 'LIVE_PAYMENT_CAPTURED', Date.now()
+        ]);
+      }
+      
+      return res.json({ 
+        success: true, 
+        data: {
+          amount: recoveredAmt,
+          payment_id: razorpay_payment_id,
+          order_id: razorpay_order_id,
+          hash: finalHash,
+          status: dbStatus
+        }
+      });
+    }
+
+    // Standard Live Flow
+    const secret = process.env.RAZORPAY_KEY_SECRET;
+    if (!secret) return res.status(500).json({ success: false, error: 'Razorpay secret not configured' });
+    
+    const expectedSignature = crypto.createHmac('sha256', secret).update(razorpay_order_id + '|' + razorpay_payment_id).digest('hex');
+    
+    if (expectedSignature !== razorpay_signature) {
+      return res.status(400).json({ success: false, error: 'Cryptographic signature mismatch. Verification failed.' });
+    }
+
+    // Synchronously update ledger for the UI since webhooks might be slightly delayed
+    let finalHash = 'PENDING_SYNC';
+    const amountInr = amount ? Math.round(Number(amount) / 100) : 0;
+    
+    if (incident_id && amountInr > 0) {
+      await db.run('UPDATE incidents SET status = ?, recovered_amount = ?, updated_at = ? WHERE id = ?', ['RECOVERED - SETTLED', amountInr, Date.now(), incident_id]);
+      
+      const prevHashRow = await db.get('SELECT hash FROM audit_ledger ORDER BY id DESC LIMIT 1');
+      const previousHash = prevHashRow ? prevHashRow.hash : '0000000000000000000000000000000000000000000000000000000000000000';
+      const contentToHash = `${previousHash}|${incident_id}|LIVE_PAYMENT_CAPTURED|RECOVERED - SETTLED|${amountInr}|${Date.now()}`;
+      finalHash = crypto.createHash('sha256').update(contentToHash).digest('hex');
+      
+      await db.run('INSERT INTO audit_ledger (hash, previous_hash, incident_id, event_type, timestamp) VALUES (?, ?, ?, ?, ?)', [
+        finalHash, previousHash, incident_id, 'LIVE_PAYMENT_CAPTURED', Date.now()
+      ]);
+    } else {
+      const prevHashRow = await db.get('SELECT hash FROM audit_ledger ORDER BY id DESC LIMIT 1');
+      finalHash = prevHashRow ? prevHashRow.hash : expectedSignature;
+    }
+
+    return res.json({ 
+      success: true, 
+      data: {
+        amount: amountInr,
+        payment_id: razorpay_payment_id,
+        order_id: razorpay_order_id,
+        hash: finalHash
+      }
+    });
+
   } catch (error) {
     console.error('Verify Payment Error:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ success: false, error: 'Internal Server Error' });
   }
 });
 
@@ -124,12 +314,12 @@ app.post('/api/webhooks/razorpay', async (req, res) => {
           const incidentId = payload.payload?.payment?.entity?.notes?.incident_id;
           if (incidentId) {
              const amountInr = payload.payload.payment.entity.amount / 100;
-             await db.run('UPDATE incidents SET status = ?, recovered_amount = ?, updated_at = ? WHERE id = ?', ['RECOVERED — SETTLED', amountInr, Date.now(), incidentId]);
+             await db.run('UPDATE incidents SET status = ?, recovered_amount = ?, updated_at = ? WHERE id = ?', ['RECOVERED - SETTLED', amountInr, Date.now(), incidentId]);
              
              // Append to Audit Ledger
              const prevHashRow = await db.get('SELECT hash FROM audit_ledger ORDER BY id DESC LIMIT 1');
              const previousHash = prevHashRow ? prevHashRow.hash : '0000000000000000000000000000000000000000000000000000000000000000';
-             const contentToHash = `${previousHash}|${incidentId}|LIVE_PAYMENT_CAPTURED|RECOVERED — SETTLED|${amountInr}|${Date.now()}`;
+             const contentToHash = `${previousHash}|${incidentId}|LIVE_PAYMENT_CAPTURED|RECOVERED - SETTLED|${amountInr}|${Date.now()}`;
              const newHash = crypto.createHash('sha256').update(contentToHash).digest('hex');
              
              await db.run('INSERT INTO audit_ledger (hash, previous_hash, incident_id, event_type, timestamp) VALUES (?, ?, ?, ?, ?)', [
@@ -321,12 +511,60 @@ app.delete('/api/demo/clear', async (req, res) => {
   res.json({ success: true });
 });
 
+app.post('/api/payments/seed', async (req, res) => {
+  const db = await getDb();
+  
+  // Helper to generate authentic looking Razorpay Order IDs (e.g., order_K8z9X1mP4vL2qR)
+  const generateAuthId = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let result = 'order_';
+    for (let i = 0; i < 14; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+  };
+  
+  const totalToGenerate = 8; // Injects 8 unique transactions at a time
+  let completed = 0;
+  let hasError = false;
+
+  for (let i = 0; i < totalToGenerate; i++) {
+    // Randomize amounts between ₹999 and ₹25,000
+    const randomAmount = Math.floor(Math.random() * 24000) + 999;
+    // 70% chance of Pending, 30% chance of Failed
+    const randomStatus = Math.random() > 0.3 ? 'PENDING' : 'PAYMENT_FAILED';
+    
+    db.run(
+      `INSERT INTO incidents (order_id, amount, status, recovered_amount) VALUES (?, ?, ?, 0)`,
+      [generateAuthId(), randomAmount, randomStatus],
+      function(err) {
+        if (err && !hasError) {
+          hasError = true;
+          return res.status(500).json({ success: false, error: err.message });
+        }
+        completed++;
+        if (completed === totalToGenerate && !hasError) {
+          res.json({ success: true, message: 'Mass authentic traffic generated' });
+        }
+      }
+    );
+  }
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     environment: razorpayClient.environmentState,
     geminiConfigured: !!process.env.GEMINI_API_KEY
   });
+});
+
+// Global Error Handler to catch synchronous exceptions
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('[Server Crash Prevented]:', err);
+  if (!res.headersSent) {
+    res.status(500).json({ success: false, error: 'Internal server error: ' + (err.message || 'Unknown Error') });
+  }
 });
 
 const PORT = process.env.PORT || 3001;
@@ -338,9 +576,34 @@ const isDirectExecution =
   import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isDirectExecution) {
-  app.listen(PORT, () => {
-    console.log(`RecoverOS Server running on port ${PORT}`);
-    console.log(`Environment: ${razorpayClient.environmentState}`);
+  getDb().then(async (db) => {
+    // CLEAR AND SEED FRESH QUEUE DATA FOR DEMO
+    console.log('[DB] Seeding fresh demo incidents for the hackathon queue...');
+    await db.exec('DELETE FROM incidents');
+    
+    const demoIncidents = [
+      ['inc_evt_demo_timeout_1', 'pay_fail_demo_1', 4999, 'ACTION_QUEUED'],
+      ['inc_evt_demo_insufficient_funds_2', 'pay_fail_demo_2', 2500, 'ACTION_QUEUED'],
+      ['inc_evt_demo_velocity_fraud_3', 'pay_fail_demo_3', 15000, 'POLICY_DENIED'],
+      ['inc_evt_demo_api_failure_4', 'pay_fail_demo_4', 1250, 'ACTION_QUEUED'],
+      ['inc_evt_demo_stolen_card_5', 'pay_fail_demo_5', 8999, 'POLICY_DENIED'],
+      ['inc_evt_demo_historical_settled_6', 'pay_fail_demo_6', 4999, 'RECOVERED - SETTLED']
+    ];
+    
+    for (const [id, pid, amt, status] of demoIncidents) {
+      await db.run(
+        'INSERT INTO incidents (id, payment_id, amount, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [id, pid, amt, status, Date.now(), Date.now()]
+      );
+    }
+    console.log('[DB] Demo queue seeded successfully.');
+
+    app.listen(Number(PORT), '0.0.0.0', () => {
+      console.log(`Server running on 0.0.0.0:${PORT}`);
+      console.log(`Environment: ${razorpayClient.environmentState}`);
+    });
+  }).catch(err => {
+    console.error('Failed to initialize database on startup:', err);
   });
 }
 
