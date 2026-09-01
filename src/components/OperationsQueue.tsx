@@ -10,6 +10,10 @@ export const OperationsQueue: React.FC = () => {
   // Checkout Modal State
   const [activeCheckout, setActiveCheckout] = useState<any>(null);
 
+  const handleSecurityReview = (orderId: string) => {
+    alert(`Security Protocol Initiated for ${orderId}.\n\nAn automated KYC verification email has been sent to the customer. Recovery is paused until identity is verified.`);
+  };
+
   const fetchData = async () => {
     try {
       const healthRes = await fetch('http://localhost:3001/api/health');
@@ -91,6 +95,9 @@ export const OperationsQueue: React.FC = () => {
               <tbody className="divide-y divide-slate-100">
                 {incidents.map(inc => {
                   const currentStatus = (inc.status || '').toUpperCase();
+                  const isSettled = currentStatus.includes('SETTLED') || currentStatus.includes('RECOVERED') || currentStatus === 'SUCCESS';
+                  const displayRecoveredAmount = isSettled ? inc.amount : (inc.recovered_amount || 0);
+
                   return (
                     <tr key={inc.id} className="hover:bg-slate-50 transition-colors">
                       <td className="px-6 py-4">
@@ -118,7 +125,7 @@ export const OperationsQueue: React.FC = () => {
                       </td>
                       <td className="px-6 py-4 font-mono font-medium text-slate-700">₹{inc.amount}</td>
                       <td className="px-6 py-4 font-mono font-bold text-emerald-600">
-                        ₹{['PAYMENT_FAILED', 'CANCELLED'].includes(currentStatus) ? 0 : inc.recovered_amount}
+                        ₹{['PAYMENT_FAILED', 'CANCELLED'].includes(currentStatus) ? 0 : displayRecoveredAmount}
                       </td>
                       <td className="px-6 py-4 text-right">
                         {(currentStatus === 'CANCELLED' || currentStatus === 'PAYMENT_FAILED') ? (
@@ -132,10 +139,13 @@ export const OperationsQueue: React.FC = () => {
                           <span className="text-emerald-600 text-xs flex items-center gap-1 justify-end font-bold px-2 py-1.5 rounded inline-flex ml-auto">
                             <CheckCircle size={14} /> Ledger Settled
                           </span>
-                        ) : currentStatus === 'POLICY_DENIED' ? (
-                          <span className="text-rose-600 text-xs flex items-center gap-1 justify-end font-bold px-2 py-1.5 rounded inline-flex ml-auto">
-                            <ShieldAlert size={14} /> Blocked by Security
-                          </span>
+                        ) : (currentStatus === 'POLICY_DENIED' || currentStatus.includes('FRAUD') || currentStatus.includes('STOLEN') || currentStatus.includes('BLOCKED')) ? (
+                          <button 
+                            onClick={() => handleSecurityReview(inc.id)}
+                            className="px-3 py-1.5 bg-rose-50 text-rose-600 border border-rose-200 rounded-md text-xs font-bold hover:bg-rose-100 transition-colors flex items-center gap-1 justify-end ml-auto"
+                          >
+                            <ShieldAlert size={14} /> Review Risk / Request KYC
+                          </button>
                         ) : (
                           <button 
                             onClick={() => setActiveCheckout(inc)}

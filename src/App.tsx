@@ -6,10 +6,20 @@ export default function App() {
 
   const injectMockTraffic = async () => {
     try {
-      await fetch('http://localhost:3001/api/payments/seed', { method: 'POST' });
-      window.location.reload(); // Hard refresh to instantly update KPI cards and table
+      const response = await fetch('http://localhost:3001/api/payments/seed', { method: 'POST' });
+      
+      if (!response.ok) {
+        throw new Error(`Server responded with ${response.status}`);
+      }
+      
+      // Success! Wait 300ms for DB to settle, then refresh
+      setTimeout(() => {
+        window.location.reload(); 
+      }, 300);
+      
     } catch (err) {
-      console.error('Failed to inject traffic', err);
+      console.error('Failed to inject traffic:', err);
+      alert('Failed to inject mock traffic. Please check if your Node.js backend is running on port 3000.');
     }
   };
 

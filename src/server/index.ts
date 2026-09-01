@@ -512,42 +512,23 @@ app.delete('/api/demo/clear', async (req, res) => {
 });
 
 app.post('/api/payments/seed', async (req, res) => {
-  const db = await getDb();
-  
-  // Helper to generate authentic looking Razorpay Order IDs (e.g., order_K8z9X1mP4vL2qR)
-  const generateAuthId = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let result = 'order_';
-    for (let i = 0; i < 14; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-  };
-  
-  const totalToGenerate = 8; // Injects 8 unique transactions at a time
-  let completed = 0;
-  let hasError = false;
-
-  for (let i = 0; i < totalToGenerate; i++) {
-    // Randomize amounts between ₹999 and ₹25,000
-    const randomAmount = Math.floor(Math.random() * 24000) + 999;
-    // 70% chance of Pending, 30% chance of Failed
-    const randomStatus = Math.random() > 0.3 ? 'PENDING' : 'PAYMENT_FAILED';
+  try {
+    const db = await getDb();
     
-    db.run(
-      `INSERT INTO incidents (order_id, amount, status, recovered_amount) VALUES (?, ?, ?, 0)`,
-      [generateAuthId(), randomAmount, randomStatus],
-      function(err) {
-        if (err && !hasError) {
-          hasError = true;
-          return res.status(500).json({ success: false, error: err.message });
-        }
-        completed++;
-        if (completed === totalToGenerate && !hasError) {
-          res.json({ success: true, message: 'Mass authentic traffic generated' });
-        }
-      }
-    );
+    // Generate 3 mock failed payments
+    for (let i = 0; i < 3; i++) {
+      const mockId = 'pay_mock_' + Date.now() + '_' + i;
+      const mockAmount = Math.floor(Math.random() * 10000) + 500;
+      await db.run(
+        'INSERT INTO incidents (order_id, amount, status, recovered_amount) VALUES (?, ?, ?, 0)',
+        [mockId, mockAmount, 'PAYMENT_FAILED']
+      );
+    }
+    
+    res.json({ success: true, message: 'Mock traffic injected' });
+  } catch (error: any) {
+    console.error("Database seed error:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
