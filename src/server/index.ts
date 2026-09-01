@@ -4,6 +4,9 @@ import { getDb } from './db/index.ts';
 import { processWebhook, reconcileIncident } from './workflow.ts';
 import { razorpayClient } from './razorpayClient.ts';
 import dotenv from 'dotenv';
+import Razorpay from 'razorpay';
+import os from 'os';
+import { pathToFileURL } from 'node:url';
 
 dotenv.config();
 
@@ -12,10 +15,6 @@ app.use(cors());
 // Need raw body for HMAC verification
 app.use('/api/webhooks/razorpay', express.raw({ type: 'application/json' }));
 app.use(express.json());
-
-import Razorpay from 'razorpay';
-
-import os from 'os';
 
 const qrScanStatuses = new Map<string, boolean>();
 
@@ -511,6 +510,9 @@ app.delete('/api/demo/clear', async (req, res) => {
   res.json({ success: true });
 });
 
+// ============================================
+// INJECT MOCK TRAFFIC ROUTE
+// ============================================
 app.post('/api/payments/seed', async (req, res) => {
   try {
     const db = await getDb();
@@ -519,6 +521,8 @@ app.post('/api/payments/seed', async (req, res) => {
     for (let i = 0; i < 3; i++) {
       const mockId = 'pay_mock_' + Date.now() + '_' + i;
       const mockAmount = Math.floor(Math.random() * 10000) + 500;
+      
+      // Async database execution
       await db.run(
         'INSERT INTO incidents (order_id, amount, status, recovered_amount) VALUES (?, ?, ?, 0)',
         [mockId, mockAmount, 'PAYMENT_FAILED']
@@ -549,8 +553,6 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 const PORT = process.env.PORT || 3001;
-
-import { pathToFileURL } from 'node:url';
 
 const isDirectExecution =
   process.argv[1] &&
