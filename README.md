@@ -1,55 +1,61 @@
-# RecoverOS AI
+<div align="center">
+  
+  # 🚀 RecoverOS
+  **An enterprise-grade command center for managing, analyzing, and recovering failed payment intents.**
+  
+  [![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](#)
+  [![Node.js](https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](#)
+  [![SQLite](https://img.shields.io/badge/SQLite-07405E?style=for-the-badge&logo=sqlite&logoColor=white)](#)
+  [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)](#)
+  
+  *Built for the Razorpay AI Buildathon 2026*
 
-**Razorpay AI Buildathon 2026 — Track 03: AI Revenue Recovery**
+</div>
 
-RecoverOS AI is an enterprise-grade, autonomous revenue recovery platform designed to detect, diagnose, and rescue failed transactions without compromising customer trust or financial safety.
+<br />
 
-## The Problem
+## 🚨 The Revenue Leak
+Failed payments are a silent revenue killer. Merchants lose millions annually to network timeouts, insufficient funds, and user drop-offs. Existing dashboards only celebrate successful transactions, leaving merchants blind to the actual capital trapped in "Failed" or "Pending" states. 
 
-E-commerce and SaaS platforms bleed significant revenue daily due to "soft declines"—temporary issuer outages, authentication abandonment, network timeouts, or insufficient funds. 
+## 💡 The RecoverOS Solution
+**RecoverOS** flips the script. It treats every failed payment as a recoverable asset. By providing real-time visibility into **Total Risk Exposure** and offering seamless, one-click recovery workflows, RecoverOS empowers merchants to reclaim lost revenue instantly.
 
-Traditional retry mechanisms are blind. They blast the payment gateway with retries, which frustrates customers, risks triggering fraud flags, and incurs unnecessary gateway fees. Merchants are left with a massive reconciliation gap, where revenue at risk is permanently lost simply because the recovery workflow wasn't intelligent enough to diagnose the *reason* for the failure.
+---
 
-## The Architecture
+## ✨ Core Architecture & Features
 
-RecoverOS AI transforms revenue recovery into a precise, highly-orchestrated lifecycle engineered for high availability and zero double-spending.
+### 📊 Real-Time Operations Queue
+* **Live Incident Tracking:** Monitors all pending, failed, and settled payment incidents in a centralized ledger.
+* **Dynamic Capital KPIs:** Automatically calculates *Total Risk Exposure* and *Capital Recovered* as transaction statuses change, providing instant ROI metrics.
 
-- **Fast-ACK Webhook Ingestion**: Razorpay webhooks are cryptographically verified and synchronously ingested into a `webhook_events` SQLite table. If a duplicate is detected via an atomic SQLite constraint, it drops the payload and ACKs the gateway. Valid events receive an immediate HTTP 200 Fast-ACK, decoupling the gateway from downstream asynchronous processing.
-- **Isolated Execution Lifecycle**: Every failed transaction goes through a strict state machine: `RECEIVED` → `DIAGNOSED` → `POLICY_APPROVED` → `ACTION_EXECUTED` → `RECOVERED` / `RECONCILIATION_PENDING`. Execution is entirely decoupled from ingestion.
-- **SQLite Idempotency Engine**: An atomic idempotency lock guarantees that no matter how many retries, duplicate webhooks, or network hiccups occur, a recovery action is executed exactly *once* per incident.
+### 🔄 Smart Recovery Workflows
+* **Omnichannel Recovery:** Integrated checkout flows allowing merchants or support agents to re-initiate payments via UPI, Cards, or Net Banking directly from the dashboard.
+* **Instant Ledger Sync:** Guaranteed state synchronization between the frontend UI and backend SQLite database upon successful payment resolution.
 
-## AI & Deterministic Safety
+### 🚦 Enterprise Stress-Testing (Demo Mode)
+* **Live Traffic Simulation:** Built-in demo controls inject highly authentic, mock Razorpay-style orders into the local database, proving the architecture scales dynamically under high-volume merchant conditions.
 
-RecoverOS utilizes Large Language Models where they excel (fuzzy classification and unstructured telemetry diagnosis) and shields them with deterministic code where absolute safety is required (financial transactions and policy limits).
+---
 
-- **Advisory AI Diagnosis**: Gemini analyzes the raw payment failure telemetry, customer tier, and historical data to diagnose the root cause (e.g., `TEMPORARY_ISSUER_OUTAGE`, `HIGH_RISK_FRAUD`). It outputs a structured recommendation (e.g., `SMART_RETRY_SCHEDULE`, `FALLBACK_UPI_PAYMENT_LINK`).
-- **Deterministic Defense-in-Depth**: The AI **cannot** execute actions directly. All AI outputs are piped through a hardcoded, deterministic Policy Engine. This engine enforces non-negotiable financial constraints:
-  - `MAX_RECOVERY_ATTEMPTS`: Prevents runaway retry loops.
-  - `MIN_COOLDOWN_HOURS`: Ensures customers aren't spammed with payment links.
-  - `MAX_INTERVENTION_COST`: Caps the monetary budget allocated to SMS/WhatsApp nudges or discount incentives.
+## 🛠️ Technical Stack
+* **Frontend:** React, Vite, Tailwind CSS
+* **Backend:** Node.js, Express
+* **Database:** SQLite (Local persistence for lightning-fast querying)
+* **Payments:** Razorpay Payment & Webhook Architecture (Simulated for demo integrity)
 
-## The Cryptographic Ledger
+---
 
-In a real-world fintech application, AI decisions must be auditable, explainable, and tamper-evident. 
+## 🚀 Getting Started (Local Setup)
 
-RecoverOS AI maintains a continuous **SHA-256 Cryptographic Audit Ledger**. Every single state change—webhook ingestion, AI diagnosis, policy approval/denial, and gateway execution—is hashed against the `previous_hash` and committed to a local, append-only SQLite ledger. This ensures absolute regulatory compliance and allows merchants to trace exactly *why* the AI chose to execute a recovery action.
+To run this project locally for evaluation:
 
-## Quick Start
-
-### 1. Install Dependencies
 ```bash
+# 1. Clone the repository
+git clone [https://github.com/Shannu123574/build.git](https://github.com/Shannu123574/build.git)
+cd build
+
+# 2. Install dependencies
 npm install
-```
 
-### 2. Run the Test Suite
-Run the 100+ master reconciliation and safety test suite to verify the cryptographic ledger, idempotency engine, and deterministic policy constraints.
-```bash
-npm test
-```
-
-### 3. Launch the Demo
-Boot up the RecoverOS Simulation environment, which spins up both the Express Backend (port 3001) and Vite React Frontend (port 3000) concurrently.
-```bash
-npm run dev
-```
-Open `http://localhost:3000` to interact with the RecoverOS Dashboard.
+# 3. Start the development server
+npm run demo
