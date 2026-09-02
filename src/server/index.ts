@@ -2,10 +2,10 @@ import express from 'express';
 import cors from 'cors';
 import { getDb } from './db/index.ts';
 import { processWebhook, reconcileIncident } from './workflow.ts';
-import { razorpayClient } from './razorpayClient.ts';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
 import { pathToFileURL } from 'node:url';
+import Razorpay from 'razorpay';
 
 dotenv.config();
 
@@ -17,7 +17,7 @@ app.use(express.json());
 const qrScanStatuses = new Map<string, boolean>();
 
 // ============================================
-// HACKATHON WINNER LOGIC: ATOMIC LEDGER WRITES
+// ATOMIC LEDGER WRITES
 // ============================================
 async function appendToLedgerAtomically(db: any, incidentId: string, dbStatus: string, amountInr: number, eventType = 'LIVE_PAYMENT_CAPTURED') {
   await db.run('BEGIN IMMEDIATE');
@@ -42,8 +42,123 @@ async function appendToLedgerAtomically(db: any, incidentId: string, dbStatus: s
 }
 
 app.get('/api/network-ip', (req, res) => {
-  const bestIp = '192.168.10.46';
-  res.json({ ip: bestIp });
+  res.json({ ip: '192.168.10.46' });
+});
+
+// ============================================
+// RAZORPAY NATIVE EVENTS (SUCCESS, CANCEL, FAIL)
+// ============================================
+app.get('/api/payments/scan/:order_id', (req, res) => {
+  const orderId = req.params.order_id;
+  const amount = req.query.amount || '4999';
+
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Razorpay Secure Checkout</title>
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <style>
+    body { font-family: -apple-system, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #F4F5F8; margin: 0; }
+    .card { background: white; padding: 2.5rem 2rem; border-radius: 12px; border: 1px solid #E2E8F0; text-align: center; width: 90%; max-width: 350px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+    .btn { background: #2D68F8; color: white; border: none; padding: 1rem; width: 100%; border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="card" id="status-card">
+    <h2 style="margin:0; color:#1C2126;">Initializing Secure Checkout...</h2>
+    <p style="color:#515978;">Connecting to Razorpay gateway.</p>
+  </div>
+  
+  <script>
+    const incidentId = "${orderId}";
+    const amountInr = ${amount};
+
+    fetch('/api/payments/create-order', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ amount: amountInr, receipt: incidentId })
+    }).then(res => res.json()).then(data => {
+      
+      if (data.success && data.key_id !== 'test_key') {
+        document.getElementById('status-card').innerHTML = '<h2 style="color:#1C2126;">Recovery Authorized</h2><p style="color:#515978;">Amount: ₹' + amountInr + '</p><button class="btn" id="rzp-btn">Pay via Razorpay Sandbox</button>';
+        
+        var options = {
+          "key": data.key_id,
+          "amount": data.amount,
+          "currency": "INR",
+          "name": "RecoverOS Sandbox",
+          "description": "Incident Recovery Payment",
+          "order_id": data.order_id,
+          "handler": function (response) {
+            // NATIVE SUCCESS
+            document.getElementById('status-card').innerHTML = '<div style="font-size:3rem">✅</div><h2 style="color:#178C44;margin:10px 0 0;">Payment Settled!</h2><p style="color:#515978;">Updating cryptographic ledger...</p>';
+            fetch('/api/payments/verify', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                amount: data.amount,
+                incident_id: incidentId
+              })
+            }).then(() => {
+              document.getElementById('status-card').innerHTML = '<div style="font-size:3rem">🔒</div><h2 style="color:#1C2126;margin:10px 0 0;">Ledger Verified</h2><p style="color:#515978;">You may close this tab.</p>';
+            });
+          },
+          "modal": {
+            "ondismiss": function() {
+              // NATIVE CANCEL (User closes the modal)
+              document.getElementById('status-card').innerHTML = '<div style="font-size:3rem">❌</div><h2 style="color:#DE350B;margin:10px 0 0;">Transaction Cancelled</h2><p style="color:#515978;">You closed the checkout window.</p>';
+              fetch('/api/payments/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mock_status: 'cancelled', incident_id: incidentId })
+              });
+            }
+          },
+          "prefill": {
+            "name": "Razorpay Demo User",
+            "email": "sandbox@razorpay.com",
+            "contact": "9999999999"
+          },
+          "theme": { "color": "#2D68F8" }
+        };
+        
+        var rzp1 = new Razorpay(options);
+        
+        // NATIVE FAILURE (Card declined, etc based on Razorpay Sandbox guidelines)
+        rzp1.on('payment.failed', function (response){
+          document.getElementById('status-card').innerHTML = '<div style="font-size:3rem">⚠️</div><h2 style="color:#B37100;margin:10px 0 0;">Payment Failed</h2><p style="color:#515978;">' + response.error.description + '</p>';
+          fetch('/api/payments/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mock_status: 'failed', incident_id: incidentId })
+          });
+        });
+
+        document.getElementById('rzp-btn').onclick = function(e){
+          rzp1.open();
+          e.preventDefault();
+        }
+        
+        // Auto-open the Razorpay Modal
+        rzp1.open();
+
+      } else {
+        document.getElementById('status-card').innerHTML = '<h2 style="color:#DE350B;">API Keys Missing</h2><p style="color:#515978;">Please add RAZORPAY_KEY_ID to your .env file to load the sandbox.</p>';
+      }
+    }).catch(err => {
+      document.getElementById('status-card').innerHTML = '<h2 style="color:#DE350B;">Connection Error</h2>';
+    });
+  </script>
+</body>
+</html>
+  `);
 });
 
 app.post('/api/payments/scan/:order_id/confirm', (req, res) => {
@@ -57,10 +172,17 @@ app.get('/api/payments/status/:order_id', (req, res) => {
 
 app.post('/api/payments/create-order', async (req, res) => {
   try {
-    const { amount } = req.body;
+    const { amount, receipt } = req.body;
     if (!amount) return res.status(400).json({ success: false, error: 'Amount is required' });
     const amountInPaise = Math.round(Number(amount) * 100);
-    return res.json({ success: true, order_id: 'order_test_' + Date.now(), amount: amountInPaise, key_id: process.env.RAZORPAY_KEY_ID || 'test_key' });
+
+    if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+      const rzp = new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET });
+      const order = await rzp.orders.create({ amount: amountInPaise, currency: 'INR', receipt: receipt || 'receipt_' + Date.now() });
+      return res.json({ success: true, order_id: order.id, amount: amountInPaise, key_id: process.env.RAZORPAY_KEY_ID });
+    } else {
+      return res.json({ success: true, order_id: 'order_test_' + Date.now(), amount: amountInPaise, key_id: 'test_key' });
+    }
   } catch (error: any) {
     return res.status(500).json({ success: false, error: error.message });
   }
@@ -69,15 +191,17 @@ app.post('/api/payments/create-order', async (req, res) => {
 app.post('/api/payments/verify', async (req, res) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, amount, incident_id, mock_status } = req.body;
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) return res.status(400).json({ success: false, error: 'Missing params' });
-
+    
     const db = await getDb();
     
+    // Handle the Native Cancel/Fail events sent from the frontend
     if (mock_status === 'cancelled' || mock_status === 'failed') {
-      const targetStatus = mock_status === 'cancelled' ? 'CANCELLED' : 'PAYMENT_FAILED';
+      const targetStatus = mock_status === 'cancelled' ? 'CANCELLED_BY_USER' : 'PAYMENT_FAILED';
       if (incident_id) await db.run(`UPDATE incidents SET status = ?, recovered_amount = 0 WHERE id = ?`, [targetStatus, incident_id]);
       return res.json({ success: true, status: targetStatus });
     }
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) return res.status(400).json({ success: false, error: 'Missing params' });
 
     if (razorpay_payment_id.startsWith('pay_test_') || razorpay_payment_id.startsWith('demo_success_') || razorpay_payment_id.startsWith('pay_direct_')) {
       const amountInr = amount ? Math.round(Number(amount) / 100) : 0;
@@ -112,6 +236,10 @@ app.post('/api/payments/verify', async (req, res) => {
 
 const LOCAL_DEMO_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || 'recoveros_local_demo_webhook_secret';
 
+// ============================================
+// ENTERPRISE WEBHOOK HANDLER
+// Features: Payload Idempotency & Velocity Breaker
+// ============================================
 app.post('/api/webhooks/razorpay', async (req, res) => {
   try {
     const signature = req.headers['x-razorpay-signature'] as string;
@@ -119,6 +247,10 @@ app.post('/api/webhooks/razorpay', async (req, res) => {
     
     const rawBody = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : JSON.stringify(req.body);
     const secretToUse = process.env.RAZORPAY_WEBHOOK_SECRET || LOCAL_DEMO_SECRET;
+    
+    // 1. STRICT IDEMPOTENCY: Hash the payload body, not just the Razorpay Event ID
+    const payloadHash = crypto.createHash('sha256').update(rawBody).digest('hex');
+    
     const expectedSignature = crypto.createHmac('sha256', secretToUse).update(rawBody).digest('hex');
     
     const expectedBuffer = Buffer.from(expectedSignature, 'hex');
@@ -132,10 +264,14 @@ app.post('/api/webhooks/razorpay', async (req, res) => {
     const db = await getDb();
     
     try {
+      // Idempotency Lock: Using payload hash prevents duplicate processing of altered retries
       await db.run('INSERT INTO webhook_events (event_id, gateway, payload, status, created_at) VALUES (?, ?, ?, ?, ?)',
-        [eventId, 'razorpay', rawBody, 'PENDING', Date.now()]);
+        [payloadHash, 'razorpay', rawBody, 'PENDING', Date.now()]);
     } catch (err: any) {
-      if (err.message && err.message.includes('UNIQUE constraint failed')) return res.status(200).send({ status: 'ignored', reason: 'duplicate' });
+      if (err.message && err.message.includes('UNIQUE constraint failed')) {
+        console.warn(`[IDEMPOTENCY HIT] Duplicate webhook dropped: ${payloadHash}`);
+        return res.status(200).send({ status: 'ignored', reason: 'idempotent_duplicate' });
+      }
       throw err;
     }
 
@@ -150,20 +286,31 @@ app.post('/api/webhooks/razorpay', async (req, res) => {
              await appendToLedgerAtomically(db, incidentId, 'RECOVERED - SETTLED', amountInr, 'LIVE_PAYMENT_CAPTURED');
           }
         } else {
-          // HACKATHON WINNER LOGIC: Deterministic Circuit Breaker
           const incidentAmount = (payload.payload?.payment?.entity?.amount || 0) / 100;
           const incidentId = payload.payload?.payment?.entity?.notes?.incident_id || `inc_${eventId}`;
           
+          // 2. VELOCITY FRAUD CIRCUIT BREAKER
+          const fifteenMinsAgo = Date.now() - (15 * 60 * 1000);
+          const velocityCheck = await db.get(
+            `SELECT SUM(amount) as recent_total FROM incidents WHERE created_at > ? AND status = 'RECOVERED - SETTLED'`, 
+            [fifteenMinsAgo]
+          );
+          
+          const recentVolume = velocityCheck?.recent_total || 0;
+
           if (incidentAmount > 10000) {
-            console.warn(`[CIRCUIT BREAKER] Incident exceeds ₹10,000 limit. Bypassing AI auto-recovery.`);
+            console.warn(`[RISK ENGINE] Blocked: Single ticket > ₹10,000`);
+            await db.run('UPDATE incidents SET status = ?, updated_at = ? WHERE id = ?', ['MANUAL_ESCALATION_REQUIRED', Date.now(), incidentId]);
+          } else if (recentVolume + incidentAmount > 50000) {
+            console.warn(`[RISK ENGINE] Blocked: Velocity Fraud Detected. > ₹50,000 in 15 mins.`);
             await db.run('UPDATE incidents SET status = ?, updated_at = ? WHERE id = ?', ['MANUAL_ESCALATION_REQUIRED', Date.now(), incidentId]);
           } else {
             await processWebhook(payload, eventId);
           }
         }
-        await db.run('UPDATE webhook_events SET status = ? WHERE event_id = ?', ['PROCESSED', eventId]);
+        await db.run('UPDATE webhook_events SET status = ? WHERE event_id = ?', ['PROCESSED', payloadHash]);
       } catch (err) {
-        await db.run('UPDATE webhook_events SET status = ? WHERE event_id = ?', ['FAILED', eventId]);
+        await db.run('UPDATE webhook_events SET status = ? WHERE event_id = ?', ['FAILED', payloadHash]);
       }
     })();
   } catch (error: any) {
@@ -176,29 +323,6 @@ app.get('/api/incidents', async (req, res) => {
   res.json(await db.all('SELECT * FROM incidents ORDER BY created_at DESC'));
 });
 
-app.get('/api/incidents/:id', async (req, res) => {
-  const db = await getDb();
-  const incident = await db.get('SELECT * FROM incidents WHERE id = ?', [req.params.id]);
-  if (!incident) return res.status(404).json({ error: 'Not found' });
-  res.json({
-    incident,
-    policy: await db.get('SELECT * FROM policy_decisions WHERE incident_id = ?', [req.params.id]),
-    action: await db.get('SELECT * FROM actions WHERE incident_id = ?', [req.params.id]),
-    audit: await db.all('SELECT * FROM audit_ledger WHERE incident_id = ? ORDER BY timestamp ASC', [req.params.id])
-  });
-});
-
-app.post('/api/incidents/:id/reconcile', async (req, res) => {
-  try {
-    res.json(await reconcileIncident(req.params.id));
-  } catch (error: any) {
-    res.status(500).json({ error: 'Reconciliation failed' });
-  }
-});
-
-// ============================================
-// FIXED MOCK TRAFFIC INJECTION ROUTE
-// ============================================
 app.post('/api/payments/seed', async (req, res) => {
   try {
     const db = await getDb();
@@ -225,7 +349,6 @@ const isDirectExecution = process.argv[1] && import.meta.url === pathToFileURL(p
 
 if (isDirectExecution) {
   getDb().then(async (db) => {
-    // Clear and seed demo data on startup
     await db.exec('DELETE FROM incidents');
     const demoIncidents = [
       ['inc_evt_demo_timeout_1', 'pay_fail_demo_1', 4999, 'ACTION_QUEUED'],

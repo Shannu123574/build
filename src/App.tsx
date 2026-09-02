@@ -1,193 +1,224 @@
-import React, { useState, useEffect } from 'react';
-import { OperationsQueue } from './components/OperationsQueue'; 
+import React, { useEffect, useState } from 'react';
+
+interface Incident {
+  id: string;
+  payment_id: string;
+  amount: number;
+  status: string;
+  recovered_amount: number;
+  created_at: number;
+}
 
 export default function App() {
-  const [metrics, setMetrics] = useState({ risk: 0, recovered: 0, pendingCount: 0, rate: 0 });
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const injectMockTraffic = async () => {
+  const fetchIncidents = async () => {
+    setRefreshing(true);
     try {
-      const response = await fetch('http://localhost:3001/api/payments/seed', { method: 'POST' });
-      
-      if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}`);
-      }
-      
-      // Success! Wait 300ms for DB to settle, then refresh
-      setTimeout(() => {
-        window.location.reload(); 
-      }, 300);
-      
-    } catch (err) {
-      console.error('Failed to inject traffic:', err);
-      alert('Failed to inject mock traffic. Please check if your Node.js backend is running on port 3000.');
+      const response = await fetch('http://localhost:3001/api/incidents');
+      const data = await response.json();
+      setIncidents(data);
+    } catch (error) {
+      console.error("Failed to fetch incidents:", error);
+    } finally {
+      setTimeout(() => setRefreshing(false), 500);
     }
   };
 
   useEffect(() => {
-    const fetchMetrics = async () => {
-      try {
-        const res = await fetch('http://localhost:3001/api/incidents');
-        const data = await res.json();
-        
-        let currentRisk = 0;
-        let currentRecovered = 0;
-        let pendingItems = 0;
-
-        if (Array.isArray(data)) {
-          data.forEach((item: any) => {
-            // Convert to uppercase and remove extra spaces for safe comparison
-            const status = (item.status || '').toUpperCase().trim();
-            const amount = Number(item.amount) || 0;
-            
-            // If the status contains ANY success keyword, count it as recovered
-            if (status.includes('RECOVERED') || status.includes('SETTLED') || status === 'SUCCESS') {
-              currentRecovered += amount;
-            } 
-            // Otherwise, if it's not explicitly cancelled, it is at risk
-            else if (!status.includes('CANCELLED')) {
-              currentRisk += amount;
-              pendingItems++;
-            }
-          });
-        }
-
-        const totalAmount = currentRisk + currentRecovered;
-        const recoveryRate = totalAmount > 0 ? Math.round((currentRecovered / totalAmount) * 100) : 0;
-
-        setMetrics({ risk: currentRisk, recovered: currentRecovered, pendingCount: pendingItems, rate: recoveryRate });
-      } catch (err) {
-        console.error("Failed to fetch metrics", err);
-      }
-    };
-
-    fetchMetrics();
-    const interval = setInterval(fetchMetrics, 2000); // Live sync every 2 seconds
-    return () => clearInterval(interval);
+    fetchIncidents();
   }, []);
 
+  const injectMockTraffic = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('http://localhost:3001/api/payments/seed', { method: 'POST' });
+      if (response.ok) {
+        setTimeout(() => {
+          fetchIncidents();
+          setLoading(false);
+        }, 400);
+      }
+    } catch (error) {
+      alert("Failed to connect to backend on port 3001.");
+      setLoading(false);
+    }
+  };
+
+  const handlePaymentSimulation = (paymentId: string, amount: number) => {
+    window.open(`http://localhost:3001/api/payments/scan/${paymentId}?amount=${amount}`, '_blank');
+    const pollInterval = setInterval(() => { fetchIncidents(); }, 2000);
+    setTimeout(() => clearInterval(pollInterval), 30000);
+  };
+
+  const formatINR = (amount: number) => {
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
+  };
+
+  const totalRecovered = incidents.reduce((sum, inc) => sum + (inc.recovered_amount || 0), 0);
+  const totalAtRisk = incidents.reduce((sum, inc) => sum + (inc.status !== 'RECOVERED - SETTLED' ? inc.amount : 0), 0);
+  const totalIncidents = incidents.length;
+
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
-      {/* 1. ENTERPRISE HEADER */}
-      <header className="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center font-bold text-white shadow-sm">
-              R
+    <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#F4F5F8', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif' }}>
+      
+      {/* SIDEBAR */}
+      <div style={{ width: '260px', backgroundColor: '#FFFFFF', borderRight: '1px solid #E2E8F0', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '24px 20px', borderBottom: '1px solid #E2E8F0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ width: '28px', height: '28px', backgroundColor: '#2D68F8', borderRadius: '6px', display: 'flex', justifyContent: 'center', alignItems: 'center', color: 'white', fontWeight: 'bold', fontSize: '14px' }}>R</div>
+            <span style={{ fontSize: '18px', fontWeight: '700', color: '#1C2126', letterSpacing: '-0.5px' }}>RecoverOS</span>
+          </div>
+        </div>
+        
+        <div style={{ padding: '20px 12px', display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
+          <div style={{ padding: '10px 12px', backgroundColor: '#F4F6F9', borderRadius: '6px', color: '#2D68F8', fontWeight: '600', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
+            Operations Desk
+          </div>
+          <div onClick={() => alert("🔒 Sandbox Environment: The AI Risk & Policy Engine is currently running headlessly in the backend.")} style={{ padding: '10px 12px', color: '#515978', fontWeight: '500', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            Risk & Policies
+          </div>
+          <div onClick={() => alert("🔒 Sandbox Environment: The Cryptographic Audit Ledger is securing transactions in the background.")} style={{ padding: '10px 12px', color: '#515978', fontWeight: '500', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+            Audit Ledger
+          </div>
+        </div>
+
+        {/* DEVELOPER SANDBOX CREDENTIALS WIDGET */}
+        <div style={{ padding: '20px', borderTop: '1px solid #E2E8F0', backgroundColor: '#F8FAFC' }}>
+          <p style={{ margin: '0 0 12px 0', fontSize: '11px', color: '#515978', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Developer Sandbox</p>
+          <div style={{ backgroundColor: '#1C2126', padding: '12px', borderRadius: '6px', color: '#F8FAFC', fontSize: '12px' }}>
+            <div style={{ marginBottom: '8px' }}>
+              <span style={{ color: '#94A3B8', display: 'block', fontSize: '10px', marginBottom: '2px' }}>TEST CARD (OTP: 123456)</span>
+              <span style={{ fontFamily: 'monospace' }}>4111 1111 1111 1111</span>
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900 leading-tight">RecoverOS</h1>
-              <p className="text-[10px] uppercase tracking-widest text-blue-600 font-bold">Powered by Razorpay AI</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm font-medium text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full">Admin Workspace</span>
-            <div className="w-9 h-9 rounded-full bg-slate-200 border-2 border-white shadow-sm flex items-center justify-center text-slate-500 font-bold">
-              JS
+              <span style={{ color: '#94A3B8', display: 'block', fontSize: '10px', marginBottom: '2px' }}>TEST UPI ID</span>
+              <span style={{ fontFamily: 'monospace', color: '#4ADE80' }}>success@razorpay</span>
             </div>
           </div>
         </div>
-      </header>
 
-      {/* 2. MAIN DASHBOARD CONTENT */}
-      <div className="flex max-w-[1600px] w-full mx-auto h-[calc(100vh-64px)]">
-        {/* LEFT SIDEBAR */}
-        <aside className="w-80 lg:w-96 border-r border-slate-200 bg-white flex flex-col p-6 overflow-y-auto hidden md:block shrink-0">
-          
-          <div className="mb-6">
-            <span className="text-xs font-bold text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-1 rounded">Razorpay AI Buildathon</span>
-            <h2 className="text-xl font-bold text-slate-800 mt-3 mb-2">RecoverOS Architecture</h2>
-            <p className="text-sm text-slate-600 leading-relaxed">
-              An intelligent payment orchestration engine designed to capture, manage, and seamlessly recover dropped payment intents.
-            </p>
+      </div>
+
+      {/* MAIN CONTENT */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        
+        {/* TOP HEADER */}
+        <header style={{ backgroundColor: '#FFFFFF', height: '72px', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 32px' }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: '20px', color: '#1C2126', fontWeight: '600' }}>Recovery Dashboard</h1>
+            <span style={{ fontSize: '12px', color: '#515978' }}>Live Sandbox Environment</span>
           </div>
-
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-2 mb-3 flex items-center gap-2">
-                🔴 The Problem
-              </h3>
-              <p className="text-sm text-slate-600 leading-relaxed">
-                High checkout abandonment occurs due to network drops, banking timeouts, and complex retry UX. Merchants lose millions in trapped capital because failed intents are treated as terminal states rather than recoverable opportunities.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-2 mb-3 flex items-center gap-2">
-                🟢 The Solution
-              </h3>
-              <p className="text-sm text-slate-600 leading-relaxed">
-                RecoverOS acts as a middleware state machine. It intercepts failed transactions, standardizes them into an action queue, and provides frictionless, cross-device alternative payment methods (like UPI Collect) to settle the ledger.
-              </p>
-            </div>
-
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 mt-4">
-              <h3 className="text-sm font-bold text-slate-800 mb-3">Live Demo Flow</h3>
-              <ul className="text-sm text-slate-600 space-y-3 font-medium">
-                <li className="flex gap-2"><span>1.</span> Select a pending dropped incident.</li>
-                <li className="flex gap-2"><span>2.</span> Initiate recovery via UPI Collect.</li>
-                <li className="flex gap-2"><span>3.</span> Trigger cross-device mobile scan.</li>
-                <li className="flex gap-2"><span>4.</span> Approve on mobile hardware.</li>
-                <li className="flex gap-2"><span>5.</span> Watch real-time Node.js backend sync update the KPI dashboard instantly.</li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="mt-8 pt-6 border-t border-slate-200">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Demo Controls</h3>
-            <button 
-              onClick={injectMockTraffic}
-              className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-mono text-xs py-2.5 px-4 rounded shadow-sm transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-              Inject Mock Traffic
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button onClick={fetchIncidents} style={{ backgroundColor: '#FFFFFF', color: '#515978', padding: '8px 16px', border: '1px solid #E2E8F0', borderRadius: '4px', fontSize: '13px', fontWeight: '600', cursor: 'pointer' }}>
+              ↻ Refresh
+            </button>
+            <button onClick={injectMockTraffic} disabled={loading} style={{ backgroundColor: '#2D68F8', color: 'white', padding: '8px 16px', border: 'none', borderRadius: '4px', fontSize: '13px', fontWeight: '600', cursor: loading ? 'not-allowed' : 'pointer' }}>
+              {loading ? 'Simulating...' : 'Inject Webhook Traffic'}
             </button>
           </div>
-        </aside>
+        </header>
 
-        {/* RIGHT DASHBOARD CONTENT */}
-        <main className="flex-1 p-6 lg:p-8 overflow-y-auto bg-slate-50">
+        {/* PAGE CONTENT */}
+        <main style={{ padding: '32px', flex: 1, overflowY: 'auto' }}>
           
-          {/* KPI METRIC CARDS (Dynamic Data) */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 hover:shadow-md transition-shadow">
-              <p className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-1">Total Risk Exposure</p>
-              <h2 className="text-3xl font-extrabold text-slate-800">₹{metrics.risk.toLocaleString('en-IN')}</h2>
-              <p className="text-xs text-red-500 font-medium mt-2 flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> {metrics.pendingCount} Pending Actions
-              </p>
+          {/* KPI CARDS */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px', marginBottom: '32px' }}>
+            <div style={{ backgroundColor: '#FFFFFF', padding: '24px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+              <p style={{ margin: '0 0 8px 0', fontSize: '13px', color: '#515978', fontWeight: '600', textTransform: 'uppercase' }}>Total Settled via AI</p>
+              <h2 style={{ margin: 0, fontSize: '28px', color: '#178C44', fontWeight: '700' }}>{formatINR(totalRecovered)}</h2>
             </div>
-            
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 hover:shadow-md transition-shadow relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-4 opacity-10 text-6xl">₹</div>
-              <p className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-1">Capital Recovered</p>
-              <h2 className="text-3xl font-extrabold text-blue-600">₹{metrics.recovered.toLocaleString('en-IN')}</h2>
-              <p className="text-xs text-green-600 font-medium mt-2 flex items-center gap-1">
-                ↗ +2.4% from yesterday
-              </p>
+            <div style={{ backgroundColor: '#FFFFFF', padding: '24px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+              <p style={{ margin: '0 0 8px 0', fontSize: '13px', color: '#515978', fontWeight: '600', textTransform: 'uppercase' }}>At Risk (Awaiting Action)</p>
+              <h2 style={{ margin: 0, fontSize: '28px', color: '#1C2126', fontWeight: '700' }}>{formatINR(totalAtRisk)}</h2>
             </div>
-            
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-100 hover:shadow-md transition-shadow">
-              <p className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-1">Recovery Rate</p>
-              <div className="flex items-end gap-2">
-                <h2 className="text-3xl font-extrabold text-slate-800">{metrics.rate}%</h2>
-              </div>
-              <div className="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
-                <div className="bg-blue-600 h-2 rounded-full transition-all duration-1000 ease-out" style={{ width: `${metrics.rate}%` }}></div>
+            <div style={{ backgroundColor: '#FFFFFF', padding: '24px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+              <p style={{ margin: '0 0 8px 0', fontSize: '13px', color: '#515978', fontWeight: '600', textTransform: 'uppercase' }}>Ledger Status</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                <div style={{ width: '12px', height: '12px', backgroundColor: '#178C44', borderRadius: '50%' }}></div>
+                <h2 style={{ margin: 0, fontSize: '22px', color: '#1C2126', fontWeight: '600' }}>Cryptographically Secured</h2>
               </div>
             </div>
           </div>
 
-          {/* 3. OPERATIONS QUEUE WRAPPER */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-1">
-            <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center bg-white rounded-t-xl">
-              <h3 className="text-lg font-bold text-slate-800">Active Recovery Queue</h3>
-              <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md">Live Sync Active</span>
+          {/* DATA TABLE */}
+          <div style={{ backgroundColor: '#FFFFFF', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+            <div style={{ padding: '16px 24px', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', color: '#1C2126', fontWeight: '600' }}>Real-time Incident Queue</h3>
+              <span style={{ fontSize: '13px', color: '#515978' }}>{totalIncidents} records found</span>
             </div>
-            <div className="p-0">
-              <OperationsQueue />
-            </div>
+            
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ backgroundColor: '#F8FAFC' }}>
+                  <th style={{ padding: '12px 24px', fontSize: '12px', fontWeight: '600', color: '#515978', textTransform: 'uppercase', borderBottom: '1px solid #E2E8F0' }}>Incident ID</th>
+                  <th style={{ padding: '12px 24px', fontSize: '12px', fontWeight: '600', color: '#515978', textTransform: 'uppercase', borderBottom: '1px solid #E2E8F0' }}>Amount</th>
+                  <th style={{ padding: '12px 24px', fontSize: '12px', fontWeight: '600', color: '#515978', textTransform: 'uppercase', borderBottom: '1px solid #E2E8F0' }}>Status</th>
+                  <th style={{ padding: '12px 24px', fontSize: '12px', fontWeight: '600', color: '#515978', textTransform: 'uppercase', borderBottom: '1px solid #E2E8F0' }}>Audit Log</th>
+                  <th style={{ padding: '12px 24px', fontSize: '12px', fontWeight: '600', color: '#515978', textTransform: 'uppercase', borderBottom: '1px solid #E2E8F0', textAlign: 'right' }}>Action</th>
+                </tr>
+              </thead>
+              <tbody style={{ opacity: refreshing ? 0.6 : 1, transition: 'opacity 0.2s' }}>
+                {incidents.map((incident) => {
+                  
+                  let statusBg = '#F4F6F9'; let statusColor = '#515978';
+                  
+                  if (incident.status === 'RECOVERED - SETTLED') {
+                    statusBg = '#E6F5EC'; statusColor = '#178C44';
+                  } else if (incident.status === 'MANUAL_ESCALATION_REQUIRED') {
+                    statusBg = '#FEEAEA'; statusColor = '#DE350B';
+                  } else if (incident.status === 'PAYMENT_FAILED' || incident.status === 'CANCELLED_BY_USER') {
+                    statusBg = '#FFF4E5'; statusColor = '#B37100';
+                  } else {
+                    statusBg = '#E6F0FF'; statusColor = '#2D68F8';
+                  }
+
+                  return (
+                    <tr key={incident.id} style={{ borderBottom: '1px solid #E2E8F0' }}>
+                      <td style={{ padding: '16px 24px', fontSize: '13px', color: '#1C2126', fontFamily: 'monospace' }}>
+                        {incident.id}
+                      </td>
+                      <td style={{ padding: '16px 24px', fontSize: '14px', fontWeight: '600', color: '#1C2126' }}>
+                        {formatINR(incident.amount)}
+                      </td>
+                      <td style={{ padding: '16px 24px' }}>
+                        <span style={{ backgroundColor: statusBg, color: statusColor, padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: '600' }}>
+                          {incident.status.replace(/_/g, ' ')}
+                        </span>
+                      </td>
+                      <td style={{ padding: '16px 24px', fontSize: '13px' }}>
+                        {incident.status === 'MANUAL_ESCALATION_REQUIRED' ? (
+                          <div style={{ color: '#DE350B', fontWeight: '500' }}>⚠️ AI BLOCKED: &gt; ₹10k</div>
+                        ) : incident.status === 'RECOVERED - SETTLED' ? (
+                          <div style={{ color: '#515978', fontFamily: 'monospace', fontSize: '12px' }}>🔒 SHA-256 Verified</div>
+                        ) : (
+                          <span style={{ color: '#94A3B8' }}>Awaiting settlement...</span>
+                        )}
+                      </td>
+                      
+                      <td style={{ padding: '16px 24px', textAlign: 'right' }}>
+                        {(incident.status !== 'RECOVERED - SETTLED' && incident.status !== 'MANUAL_ESCALATION_REQUIRED') && (
+                          <button
+                            onClick={() => handlePaymentSimulation(incident.id, incident.amount)}
+                            style={{ backgroundColor: '#1C2126', color: 'white', border: 'none', padding: '6px 14px', borderRadius: '4px', fontSize: '12px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto' }}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2L11 13"></path><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                            Send Payment Link
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
-          
+
         </main>
       </div>
     </div>
