@@ -9,10 +9,18 @@ interface Incident {
   created_at: number;
 }
 
+interface Log {
+  id: string;
+  timestamp: number;
+  text: string;
+  incidentId: string;
+}
+
 export default function App() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [aiLogs, setAiLogs] = useState<Log[]>([]);
 
   const fetchIncidents = async () => {
     setRefreshing(true);
@@ -29,6 +37,29 @@ export default function App() {
 
   useEffect(() => {
     fetchIncidents();
+
+    // ==========================================
+    // ENTERPRISE SSE FRONTEND CONSUMER
+    // Replaces setInterval polling with live streams
+    // ==========================================
+    const eventSource = new EventSource('http://localhost:3001/api/stream');
+
+    eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      
+      // 1. Inject live AI reasoning into the terminal UI
+      setAiLogs(prev => [
+        { id: Math.random().toString(), timestamp: Date.now(), text: data.aiReasoning, incidentId: data.incidentId },
+        ...prev
+      ].slice(0, 6)); // Keep last 6 logs
+
+      // 2. Instantly mutate the dashboard state without a full HTTP refetch
+      setIncidents(prevIncidents => prevIncidents.map(inc => 
+        inc.id === data.incidentId ? { ...inc, status: data.status } : inc
+      ));
+    };
+
+    return () => eventSource.close();
   }, []);
 
   const injectMockTraffic = async () => {
@@ -42,15 +73,14 @@ export default function App() {
         }, 400);
       }
     } catch (error) {
-      alert("Failed to connect to backend on port 3001.");
+      alert("Failed to connect to backend.");
       setLoading(false);
     }
   };
 
   const handlePaymentSimulation = (paymentId: string, amount: number) => {
+    // Polling removed! The SSE EventSource will now handle the real-time updates.
     window.open(`http://localhost:3001/api/payments/scan/${paymentId}?amount=${amount}`, '_blank');
-    const pollInterval = setInterval(() => { fetchIncidents(); }, 2000);
-    setTimeout(() => clearInterval(pollInterval), 30000);
   };
 
   const formatINR = (amount: number) => {
@@ -78,37 +108,31 @@ export default function App() {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
             Operations Desk
           </div>
-          <div onClick={() => alert("🔒 Sandbox Environment: The AI Risk & Policy Engine is currently running headlessly in the backend.")} style={{ padding: '10px 12px', color: '#515978', fontWeight: '500', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-            Risk & Policies
-          </div>
-          <div onClick={() => alert("🔒 Sandbox Environment: The Cryptographic Audit Ledger is securing transactions in the background.")} style={{ padding: '10px 12px', color: '#515978', fontWeight: '500', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-            Audit Ledger
-          </div>
         </div>
 
-        {/* DEVELOPER SANDBOX CREDENTIALS WIDGET */}
+        {/* DEVELOPER SANDBOX CREDENTIALS */}
         <div style={{ padding: '20px', borderTop: '1px solid #E2E8F0', backgroundColor: '#F8FAFC' }}>
           <p style={{ margin: '0 0 12px 0', fontSize: '11px', color: '#515978', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Developer Sandbox</p>
           <div style={{ backgroundColor: '#1C2126', padding: '12px', borderRadius: '6px', color: '#F8FAFC', fontSize: '12px' }}>
-            <div style={{ marginBottom: '8px' }}>
-              <span style={{ color: '#94A3B8', display: 'block', fontSize: '10px', marginBottom: '2px' }}>TEST CARD (OTP: 123456)</span>
-              <span style={{ fontFamily: 'monospace' }}>4111 1111 1111 1111</span>
+            <div style={{ marginBottom: '12px' }}>
+              <span style={{ color: '#94A3B8', display: 'block', fontSize: '10px', marginBottom: '4px' }}>DOMESTIC TEST CARD</span>
+              <span style={{ fontFamily: 'monospace', letterSpacing: '1px', userSelect: 'all', cursor: 'pointer', backgroundColor: '#334155', padding: '2px 6px', borderRadius: '4px' }}>
+                4100280000001007
+              </span>
             </div>
             <div>
-              <span style={{ color: '#94A3B8', display: 'block', fontSize: '10px', marginBottom: '2px' }}>TEST UPI ID</span>
-              <span style={{ fontFamily: 'monospace', color: '#4ADE80' }}>success@razorpay</span>
+              <span style={{ color: '#94A3B8', display: 'block', fontSize: '10px', marginBottom: '4px' }}>TEST UPI ID</span>
+              <span style={{ fontFamily: 'monospace', color: '#4ADE80', userSelect: 'all', cursor: 'pointer', backgroundColor: '#14532D', padding: '2px 6px', borderRadius: '4px' }}>
+                success@razorpay
+              </span>
             </div>
           </div>
         </div>
-
       </div>
 
       {/* MAIN CONTENT */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
         
-        {/* TOP HEADER */}
         <header style={{ backgroundColor: '#FFFFFF', height: '72px', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 32px' }}>
           <div>
             <h1 style={{ margin: 0, fontSize: '20px', color: '#1C2126', fontWeight: '600' }}>Recovery Dashboard</h1>
@@ -124,11 +148,9 @@ export default function App() {
           </div>
         </header>
 
-        {/* PAGE CONTENT */}
         <main style={{ padding: '32px', flex: 1, overflowY: 'auto' }}>
           
-          {/* KPI CARDS */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px', marginBottom: '32px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px', marginBottom: '24px' }}>
             <div style={{ backgroundColor: '#FFFFFF', padding: '24px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
               <p style={{ margin: '0 0 8px 0', fontSize: '13px', color: '#515978', fontWeight: '600', textTransform: 'uppercase' }}>Total Settled via AI</p>
               <h2 style={{ margin: 0, fontSize: '28px', color: '#178C44', fontWeight: '700' }}>{formatINR(totalRecovered)}</h2>
@@ -137,11 +159,21 @@ export default function App() {
               <p style={{ margin: '0 0 8px 0', fontSize: '13px', color: '#515978', fontWeight: '600', textTransform: 'uppercase' }}>At Risk (Awaiting Action)</p>
               <h2 style={{ margin: 0, fontSize: '28px', color: '#1C2126', fontWeight: '700' }}>{formatINR(totalAtRisk)}</h2>
             </div>
-            <div style={{ backgroundColor: '#FFFFFF', padding: '24px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
-              <p style={{ margin: '0 0 8px 0', fontSize: '13px', color: '#515978', fontWeight: '600', textTransform: 'uppercase' }}>Ledger Status</p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
-                <div style={{ width: '12px', height: '12px', backgroundColor: '#178C44', borderRadius: '50%' }}></div>
-                <h2 style={{ margin: 0, fontSize: '22px', color: '#1C2126', fontWeight: '600' }}>Cryptographically Secured</h2>
+            
+            {/* LIVE AI REASONING TERMINAL */}
+            <div style={{ backgroundColor: '#1C2126', padding: '16px', borderRadius: '8px', display: 'flex', flexDirection: 'column', height: '110px', overflow: 'hidden', boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)' }}>
+              <p style={{ margin: '0 0 8px 0', fontSize: '11px', color: '#4ADE80', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '1px' }}>● Live AI Reasoning Stream</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', overflowY: 'auto' }}>
+                {aiLogs.length === 0 ? (
+                  <span style={{ color: '#515978', fontSize: '12px', fontFamily: 'monospace' }}>Awaiting webhook payload...</span>
+                ) : (
+                  aiLogs.map(log => (
+                    <div key={log.id} style={{ display: 'flex', gap: '8px', fontSize: '12px', fontFamily: 'monospace' }}>
+                      <span style={{ color: '#94A3B8', minWidth: '60px' }}>[{new Date(log.timestamp).toLocaleTimeString([], {hour12: false, second: '2-digit'})}]</span>
+                      <span style={{ color: '#E2E8F0' }}>{log.text}</span>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -193,14 +225,13 @@ export default function App() {
                       </td>
                       <td style={{ padding: '16px 24px', fontSize: '13px' }}>
                         {incident.status === 'MANUAL_ESCALATION_REQUIRED' ? (
-                          <div style={{ color: '#DE350B', fontWeight: '500' }}>⚠️ AI BLOCKED: &gt; ₹10k</div>
+                          <div style={{ color: '#DE350B', fontWeight: '500' }}>⚠️ AI Policy Engine Block</div>
                         ) : incident.status === 'RECOVERED - SETTLED' ? (
                           <div style={{ color: '#515978', fontFamily: 'monospace', fontSize: '12px' }}>🔒 SHA-256 Verified</div>
                         ) : (
                           <span style={{ color: '#94A3B8' }}>Awaiting settlement...</span>
                         )}
                       </td>
-                      
                       <td style={{ padding: '16px 24px', textAlign: 'right' }}>
                         {(incident.status !== 'RECOVERED - SETTLED' && incident.status !== 'MANUAL_ESCALATION_REQUIRED') && (
                           <button

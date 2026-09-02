@@ -16,7 +16,7 @@
     "demo": "concurrently -n \"SERVER,FRONTEND\" -c \"bgBlue.bold,bgMagenta.bold\" \"npm run server\" \"npm run dev:ui\" --kill-others"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
+    "@google/genai": "^2.20.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "better-sqlite3": "^13.0.3",
@@ -25,12 +25,14 @@
     "express": "^4.22.2",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "openai": "^7.9.0",
     "razorpay": "^2.9.8",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "sqlite": "^5.1.1",
     "sqlite3": "^6.0.1",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
