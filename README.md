@@ -1,51 +1,47 @@
-# RecoverOS
-**Enterprise-Grade Payment Failure Orchestration**
+# RecoverOS 🛡️
 
-RecoverOS is a deterministic recovery engine for the Razorpay ecosystem. It replaces brittle `if/else` webhook routing with a **Cognitive Diagnostic Layer** powered by Gemini 2.5 Flash, dynamically translating unstructured gateway errors into cryptographically secured, machine-actionable recovery protocols.
+**Deterministic Revenue AI for Enterprise Merchants.**
 
-## Why RecoverOS Wins
+Merchants bleed revenue during payment failures because gateway error codes are unstructured chaos. Static rule engines trap buyers in generic "try again" loops, often leading to cart abandonment—especially during UPI or bank PSP timeouts. 
 
-### 1. Strictly Bounded AI Execution
-LLMs should never execute financial transactions. RecoverOS physically bounds the Gemini 2.5 Flash model using the `@google/genai` strict `responseSchema` enums. The AI acts solely as a telemetry sensor—parsing raw webhook metadata to identify intent (e.g., `STOLEN_CARD_SIGNATURE` vs. `NETWORK_TIMEOUT`). If confidence drops below 85%, the system deterministically degrades to `ESCALATE_TO_HUMAN`. 
-
-### 2. The Deterministic Policy Engine
-While the AI provides semantic classification, 100% of execution authority remains in hard-coded Node.js logic. The engine enforces economic floors and velocity limits before any ledger write occurs, mathematically guaranteeing the AI cannot hallucinate a monetary action.
-
-### 3. Cryptographic Audit Ledger
-Traditional databases are vulnerable to internal state manipulation. RecoverOS implements a tamper-evident, append-only ledger using SQLite Write-Ahead Logging (WAL). Every state change hashes `previous_hash | incident_id | event_type | amount` via SHA-256. If a record is manually altered by a rogue admin, the cryptographic chain breaks instantly.
-
-### 4. Real-Time Telemetry Streaming (SSE)
-Built for live ops desks, the system abandons legacy HTTP polling for an event-driven Server-Sent Events (SSE) pipeline. AI reasoning traces and gateway failures stream to the frontend dashboard in milliseconds, entirely eliminating UI race conditions.
+**RecoverOS** solves this by utilizing Google's Gemini 2.5 Flash as a real-time semantic diagnostic sensor, paired with a strict, deterministic Node.js policy engine to instantly route failed payments across alternative financial rails.
 
 ---
 
-## Standard Routing vs. RecoverOS
+## 🏗 Core Architecture & Pillars
 
-| Feature | Legacy Webhook Architecture | RecoverOS |
-| :--- | :--- | :--- |
-| **Error Parsing** | Brittle regex and static mapping | Semantic Gemini normalization |
-| **State Delivery** | Expensive `setInterval` polling | Zero-latency Server-Sent Events (SSE) |
-| **Auditability** | Vulnerable to direct DB edits | SHA-256 immutable hash chain |
-| **Execution** | Blindly auto-retries | Context-aware deterministic routing |
+We built RecoverOS to pass the compliance, security, and latency standards of an enterprise risk team:
 
----
-
-## The Tech Stack
-* **AI Layer:** Google Gemini 2.5 Flash (Strict JSON Output Mode)
-* **Payment Infrastructure:** Razorpay Node.js SDK & Webhooks
-* **Backend:** Express.js, TypeScript, Server-Sent Events (SSE), Node Crypto
-* **Database:** SQLite3 (Write-Ahead Logging enabled)
-* **Frontend:** React, Tailwind CSS
+*   **Bounded Cognitive Diagnosis:** We do not use AI to execute transactions. Gemini 2.5 Flash is strictly physically bounded using enforced JSON Enums and high-confidence floors. It translates unstructured gateway chaos into clean, actionable telemetry.
+*   **Deterministic Execution Engine:** Once the AI normalizes the error intent (e.g., `NPCI_PSP_TIMEOUT`), our Node.js deterministic policy engine retains 100% of execution authority, ensuring zero hallucination risk in the financial flow.
+*   **Smart Cross-Rail Fallback:** If a customer's UPI bank server goes down, RecoverOS automatically suppresses the broken rail and instantly dispatches an SMS/WhatsApp fallback link, shifting the transaction to a Credit Card or Wallet to save the sale.
+*   **Cryptographic Ledgering:** Every failure, AI diagnosis, and recovery action is hashed sequentially via SHA-256 into a secure Write-Ahead Log (WAL). A rogue admin cannot alter a recovered transaction without breaking the cryptographic chain.
 
 ---
 
-## Local Demo Execution Guide
+## 💻 Tech Stack
 
-To evaluate the live AI reasoning stream on a local machine, RecoverOS includes a Bypass Bridge that routes frontend SDK failures directly into the backend SSE pipeline (bypassing the need for Ngrok tunneling).
+*   **Frontend:** React.js, Tailwind CSS
+*   **Backend Policy Engine:** Node.js, Express
+*   **AI/Cognitive Sensor:** Google Gemini 2.5 Flash (via `@google/genai`)
+*   **Database & Forensics:** SQLite with SHA-256 hashing
+*   **Real-time Telemetry:** Server-Sent Events (SSE)
+*   **Payment Infrastructure:** Razorpay Standard Checkout (`checkout.js`) with Native UPI/QR
 
-**1. Environment Setup**
-Create a `.env` file in the root directory:
-```env
-GEMINI_API_KEY=AQ.your_key_here
-RAZORPAY_KEY_ID=rzp_test_your_key_here
-RAZORPAY_KEY_SECRET=your_secret_here
+---
+
+## 📊 Dashboard Modules
+
+1.  **Operations Desk:** A live SSE-streamed terminal tracking payment webhooks, AI reasoning traces, and a real-time Recovery Queue displaying saved revenue.
+2.  **Case Forensics:** A cryptographic audit UI showcasing immutable SHA-256 hash chains for all recovered transactions to ensure absolute ledger integrity.
+3.  **Agent Activity:** Real-time telemetry monitoring Gemini's latency, token burn, confidence scoring thresholds, and schema validation blocks.
+4.  **Analytics & Yield:** System-wide KPI generation mapping net recovery yield, cross-rail fallback distribution, and automated vs. manual escalation rates.
+
+---
+
+## 🚀 Local Setup & Installation
+
+**1. Clone the repository**
+```bash
+git clone [https://github.com/your-username/recoveros.git](https://github.com/your-username/recoveros.git)
+cd recoveros
