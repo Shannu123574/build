@@ -17,10 +17,21 @@ interface Log {
 }
 
 export default function App() {
+  // --- SPLASH SCREEN STATE ---
+  const [showSplash, setShowSplash] = useState(true);
+
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [aiLogs, setAiLogs] = useState<Log[]>([]);
+
+  // Handle Splash Screen Timer
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+    }, 3000); // 3 seconds
+    return () => clearTimeout(timer);
+  }, []);
 
   const fetchIncidents = async () => {
     setRefreshing(true);
@@ -36,31 +47,31 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchIncidents();
+    // Only fetch data after the splash screen finishes
+    if (!showSplash) {
+      fetchIncidents();
 
-    // ==========================================
-    // ENTERPRISE SSE FRONTEND CONSUMER
-    // Replaces setInterval polling with live streams
-    // ==========================================
-    const eventSource = new EventSource('http://localhost:3001/api/stream');
+      // ==========================================
+      // ENTERPRISE SSE FRONTEND CONSUMER
+      // ==========================================
+      const eventSource = new EventSource('http://localhost:3001/api/stream');
 
-    eventSource.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      
-      // 1. Inject live AI reasoning into the terminal UI
-      setAiLogs(prev => [
-        { id: Math.random().toString(), timestamp: Date.now(), text: data.aiReasoning, incidentId: data.incidentId },
-        ...prev
-      ].slice(0, 6)); // Keep last 6 logs
+      eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        
+        setAiLogs(prev => [
+          { id: Math.random().toString(), timestamp: Date.now(), text: data.aiReasoning, incidentId: data.incidentId },
+          ...prev
+        ].slice(0, 6)); 
 
-      // 2. Instantly mutate the dashboard state without a full HTTP refetch
-      setIncidents(prevIncidents => prevIncidents.map(inc => 
-        inc.id === data.incidentId ? { ...inc, status: data.status } : inc
-      ));
-    };
+        setIncidents(prevIncidents => prevIncidents.map(inc => 
+          inc.id === data.incidentId ? { ...inc, status: data.status } : inc
+        ));
+      };
 
-    return () => eventSource.close();
-  }, []);
+      return () => eventSource.close();
+    }
+  }, [showSplash]);
 
   const injectMockTraffic = async () => {
     setLoading(true);
@@ -79,7 +90,6 @@ export default function App() {
   };
 
   const handlePaymentSimulation = (paymentId: string, amount: number) => {
-    // Polling removed! The SSE EventSource will now handle the real-time updates.
     window.open(`http://localhost:3001/api/payments/scan/${paymentId}?amount=${amount}`, '_blank');
   };
 
@@ -91,6 +101,48 @@ export default function App() {
   const totalAtRisk = incidents.reduce((sum, inc) => sum + (inc.status !== 'RECOVERED - SETTLED' ? inc.amount : 0), 0);
   const totalIncidents = incidents.length;
 
+  // ==========================================
+  // RENDER: SPLASH SCREEN VIEW
+  // ==========================================
+  if (showSplash) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
+        height: '100vh', width: '100vw', backgroundColor: '#0F172A',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
+      }}>
+        <svg 
+          width="140" height="140" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg"
+          style={{ filter: 'drop-shadow(0px 8px 16px rgba(45, 104, 248, 0.2))' }}
+        >
+          <rect width="100" height="100" rx="24" fill="#1E293B" />
+          <rect x="2" y="2" width="96" height="96" rx="22" stroke="#2D68F8" strokeWidth="4" strokeOpacity="0.3"/>
+          <path d="M30 65C23 55 25 38 38 30C50 23 68 28 75 40" stroke="#4ADE80" strokeWidth="6" strokeLinecap="round"/>
+          <path d="M75 25V40H60" stroke="#4ADE80" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M40 70V40C40 35 44 32 50 32C56 32 60 35 60 40C60 46 56 49 50 49H40" stroke="#FFFFFF" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M50 49L62 70" stroke="#2D68F8" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+
+        <h1 style={{ color: '#FFFFFF', fontSize: '42px', fontWeight: '700', letterSpacing: '-1.5px', marginTop: '32px', marginBottom: '8px' }}>
+          Recover<span style={{ color: '#2D68F8' }}>OS</span>
+        </h1>
+        <p style={{ color: '#94A3B8', fontSize: '13px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '3px', margin: 0 }}>
+          Deterministic Revenue AI
+        </p>
+
+        <div style={{ marginTop: '48px', display: 'flex', gap: '8px' }}>
+          <div style={{ width: '8px', height: '8px', backgroundColor: '#2D68F8', borderRadius: '50%', animation: 'pulse 1.5s infinite ease-in-out' }} />
+          <div style={{ width: '8px', height: '8px', backgroundColor: '#4ADE80', borderRadius: '50%', animation: 'pulse 1.5s infinite ease-in-out', animationDelay: '0.2s' }} />
+          <div style={{ width: '8px', height: '8px', backgroundColor: '#FFFFFF', borderRadius: '50%', animation: 'pulse 1.5s infinite ease-in-out', animationDelay: '0.4s' }} />
+        </div>
+        <style>{`@keyframes pulse { 0%, 100% { opacity: 0.3; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.2); } }`}</style>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // RENDER: MAIN DASHBOARD VIEW
+  // ==========================================
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#F4F5F8', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif' }}>
       

@@ -390,7 +390,7 @@ app.post('/api/webhooks/razorpay', async (req, res) => {
 async function getLLMDiagnosisClass(payload: any): Promise<string> {
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.5-flash-lite',
       contents: `Analyze this raw gateway telemetry: ${JSON.stringify(payload.payload?.payment?.entity || payload)}`,
       config: {
         systemInstruction: "You are a Level 3 Payment Support Engineer. Analyze the raw Razorpay webhook payload. Identify the root cause of the failure and output ONLY a valid JSON classification. Do not guess—if ambiguous, choose ESCALATE_TO_HUMAN.",
